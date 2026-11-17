@@ -1,72 +1,133 @@
-"""Incremento 1: Facultad. Python 3 + Tkinter + SQLite, sin pip."""
-import sqlite3
+"""Incremento 1: Facultad. Python 3 + Tkinter + PostgreSQL (psycopg)."""
+import configparser
+import sys
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-BASE = Path(__file__).resolve().parent
+import psycopg
+from psycopg import sql
+
+# Carpeta del programa (junto al .exe cuando está empaquetado) y carpeta de recursos.
+APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
+RES_DIR = Path(getattr(sys, '_MEIPASS', APP_DIR))
+
+ESQUEMA = '''
+CREATE TABLE IF NOT EXISTS facultades (
+    id SERIAL PRIMARY KEY,
+    codigo VARCHAR(20) NOT NULL,
+    nombre VARCHAR(120) NOT NULL,
+    activo BOOLEAN NOT NULL DEFAULT TRUE);
+CREATE UNIQUE INDEX IF NOT EXISTS facultades_codigo_uk ON facultades (upper(codigo));
+CREATE TABLE IF NOT EXISTS carreras (
+    id SERIAL PRIMARY KEY,
+    codigo VARCHAR(20) NOT NULL,
+    nombre VARCHAR(120) NOT NULL,
+    facultad_id INTEGER REFERENCES facultades(id));
+CREATE UNIQUE INDEX IF NOT EXISTS carreras_codigo_uk ON carreras (upper(codigo));
+'''
+
+
+def leer_config(path=None):
+    """Lee config.ini (sección [postgresql]). Los valores vacíos se omiten para que
+    libpq use sus variables de entorno (PGHOST, PGPASSWORD, ...) o sus valores por defecto."""
+    params = {'host': 'localhost', 'port': '5432', 'dbname': 'bibliografia', 'user': 'postgres',
+              'connect_timeout': '5'}
+    parser = configparser.ConfigParser()
+    parser.read(path or APP_DIR / 'config.ini', encoding='utf-8')
+    if parser.has_section('postgresql'):
+        params.update(parser['postgresql'])
+    return {k: v for k, v in params.items() if v.strip()}
+
+
+def conectar(params):
+    """Conecta a la base; si no existe, la crea desde la base de mantenimiento 'postgres'."""
+    try:
+        return psycopg.connect(**params, autocommit=True)
+    except psycopg.OperationalError as original:
+        if isinstance(original, psycopg.errors.ConnectionTimeout):
+            raise  # el servidor no responde: no tiene sentido intentar crear la base
+        admin = {**params, 'dbname': 'postgres'}
+        try:
+            with psycopg.connect(**admin, autocommit=True) as conn:
+                if conn.execute('SELECT 1 FROM pg_database WHERE datname=%s', (params['dbname'],)).fetchone():
+                    raise original
+                conn.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(params['dbname'])))
+        except psycopg.Error:
+            raise original from None
+        return psycopg.connect(**params, autocommit=True)
 
 
 class Repository:
-    def __init__(self, path):
-        self.db = sqlite3.connect(path)
-        self.db.execute('PRAGMA foreign_keys=ON')
-        self.db.executescript('''
-        CREATE TABLE IF NOT EXISTS facultades (
-            id INTEGER PRIMARY KEY, codigo TEXT NOT NULL UNIQUE COLLATE NOCASE,
-            nombre TEXT NOT NULL, activo INTEGER NOT NULL DEFAULT 1 CHECK(activo IN (0,1)));
-        CREATE TABLE IF NOT EXISTS carreras (
-            id INTEGER PRIMARY KEY, codigo TEXT NOT NULL UNIQUE COLLATE NOCASE,
-            nombre TEXT NOT NULL, facultad_id INTEGER REFERENCES facultades(id));
-        ''')
+    def __init__(self, params, schema=None):
+        self.db = conectar(params)
+        if schema:  # usado por las pruebas para trabajar en un esquema aislado
+            self.db.execute(sql.SQL('CREATE SCHEMA IF NOT EXISTS {}').format(sql.Identifier(schema)))
+            self.db.execute(sql.SQL('SET search_path TO {}').format(sql.Identifier(schema)))
+        with self.db.transaction():
+            self.db.execute(ESQUEMA)
+
+    def close(self):
+        self.db.close()
 
     def facultades(self, query='', inactive=False):
-        return self.db.execute('SELECT id,codigo,nombre,activo FROM facultades WHERE (? OR activo=1) AND (instr(lower(nombre),lower(?))>0 OR instr(lower(codigo),lower(?))>0) ORDER BY nombre', (inactive,query,query)).fetchall()
+        return self.db.execute(
+            'SELECT id,codigo,nombre,activo FROM facultades '
+            'WHERE (%s OR activo) AND (strpos(lower(nombre),lower(%s))>0 OR strpos(lower(codigo),lower(%s))>0) '
+            'ORDER BY nombre', (inactive, query, query)).fetchall()
+
+    def carreras(self):
+        return self.db.execute(
+            'SELECT c.id,c.codigo,c.nombre,f.nombre,f.activo FROM carreras c '
+            'LEFT JOIN facultades f ON f.id=c.facultad_id ORDER BY c.nombre').fetchall()
 
     def guardar(self, codigo, nombre, ident=None):
         codigo, nombre = codigo.strip().upper(), nombre.strip()
         if not codigo or not nombre:
             raise ValueError('Completá código y nombre.')
-        if len(codigo)>20 or len(nombre)>120:
+        if len(codigo) > 20 or len(nombre) > 120:
             raise ValueError('Código: máximo 20 caracteres. Nombre: máximo 120.')
         try:
-            with self.db:
+            with self.db.transaction():
                 if ident is None:
-                    self.db.execute('INSERT INTO facultades(codigo,nombre) VALUES (?,?)',(codigo,nombre))
+                    self.db.execute('INSERT INTO facultades(codigo,nombre) VALUES (%s,%s)', (codigo, nombre))
                 else:
-                    self.db.execute('UPDATE facultades SET codigo=?,nombre=? WHERE id=?',(codigo,nombre,ident))
-        except sqlite3.IntegrityError:
+                    self.db.execute('UPDATE facultades SET codigo=%s,nombre=%s WHERE id=%s', (codigo, nombre, ident))
+        except psycopg.errors.UniqueViolation:
             raise ValueError('Ese código ya existe, incluso entre las facultades inactivas.') from None
 
     def estado(self, ident, active):
-        with self.db:
-            self.db.execute('UPDATE facultades SET activo=? WHERE id=?',(int(active),ident))
+        with self.db.transaction():
+            self.db.execute('UPDATE facultades SET activo=%s WHERE id=%s', (bool(active), ident))
 
     def carrera(self, codigo, nombre):
-        if not codigo.strip() or not nombre.strip():
+        codigo, nombre = codigo.strip().upper(), nombre.strip()
+        if not codigo or not nombre:
             raise ValueError('Completá código y nombre de la carrera.')
+        if len(codigo) > 20 or len(nombre) > 120:
+            raise ValueError('Código: máximo 20 caracteres. Nombre: máximo 120.')
         try:
-            with self.db:
-                self.db.execute('INSERT INTO carreras(codigo,nombre) VALUES (?,?)',(codigo.strip().upper(),nombre.strip()))
-        except sqlite3.IntegrityError:
+            with self.db.transaction():
+                self.db.execute('INSERT INTO carreras(codigo,nombre) VALUES (%s,%s)', (codigo, nombre))
+        except psycopg.errors.UniqueViolation:
             raise ValueError('El código de carrera ya existe.') from None
 
     def asociar(self, carrera, facultad):
-        if facultad is not None and not self.db.execute('SELECT 1 FROM facultades WHERE id=? AND activo=1',(facultad,)).fetchone():
+        if facultad is not None and not self.db.execute('SELECT 1 FROM facultades WHERE id=%s AND activo', (facultad,)).fetchone():
             raise ValueError('Seleccioná una facultad activa.')
-        if not self.db.execute('SELECT 1 FROM carreras WHERE id=?',(carrera,)).fetchone():
+        if not self.db.execute('SELECT 1 FROM carreras WHERE id=%s', (carrera,)).fetchone():
             raise ValueError('Seleccioná una carrera existente.')
-        with self.db:
-            self.db.execute('UPDATE carreras SET facultad_id=? WHERE id=?',(facultad,carrera))
+        with self.db.transaction():
+            self.db.execute('UPDATE carreras SET facultad_id=%s WHERE id=%s', (facultad, carrera))
 
 
 class App(tk.Tk):
-    def __init__(self):
+    def __init__(self, repo):
         super().__init__()
         self.title('Bibliografía universitaria · Módulo Facultad')
         self.geometry('1000x680')
         self.minsize(800,580)
-        self.repo = Repository(BASE/'bibliografia.sqlite3')
+        self.repo = repo
         self.selected = None
         style=ttk.Style(self)
         style.theme_use('clam')
@@ -77,7 +138,7 @@ class App(tk.Tk):
         modules.add_command(label='Facultades',command=lambda:self.tabs.select(0))
         modules.add_command(label='Asociación Facultad–Carrera',command=lambda:self.tabs.select(1))
         modules.add_separator()
-        modules.add_command(label='Salir',command=self.destroy)
+        modules.add_command(label='Salir',command=self.close)
         menu.add_cascade(label='Menú principal',menu=modules)
         menu.add_command(label='Manual de usuario (F1)',command=self.help)
         self.config(menu=menu)
@@ -98,7 +159,7 @@ class App(tk.Tk):
         self.protocol('WM_DELETE_WINDOW',self.close)
 
     def close(self):
-        self.repo.db.close()
+        self.repo.close()
         self.destroy()
 
     def run(self, action):
@@ -106,7 +167,7 @@ class App(tk.Tk):
             action()
             self.refresh()
             self.status.set('Operación realizada. Los cambios están guardados.')
-        except (ValueError,sqlite3.Error) as exc:
+        except (ValueError,psycopg.Error) as exc:
             messagebox.showerror('Revisá los datos',str(exc),parent=self)
 
     def build_fac(self):
@@ -203,7 +264,7 @@ class App(tk.Tk):
         self.faculty_box['values']=[f'{f[1]} · {f[2]}' for f in faculties]
         self.faculty_box.set('')
         self.career_tree.delete(*self.career_tree.get_children())
-        for ident,code,name,faculty,active in self.repo.db.execute('SELECT c.id,c.codigo,c.nombre,f.nombre,f.activo FROM carreras c LEFT JOIN facultades f ON f.id=c.facultad_id ORDER BY c.nombre'):
+        for ident,code,name,faculty,active in self.repo.carreras():
             self.career_tree.insert('','end',iid=str(ident),values=(code,name,faculty or 'Sin vínculo',('Activa' if active else 'Inactiva') if faculty else '—'))
 
     def help(self):
@@ -211,9 +272,26 @@ class App(tk.Tk):
         text=tk.Text(win,wrap='word',padx=20,pady=20,font=('Arial',12))
         text.pack(fill='both',expand=True)
         section='FACULTADES' if self.tabs.index(self.tabs.select())==0 else 'ASOCIACIONES'
-        text.insert('1.0',f'AYUDA DE {section}\n\n'+(BASE/'MANUAL.txt').read_text(encoding='utf-8'))
+        text.insert('1.0',f'AYUDA DE {section}\n\n'+(RES_DIR/'MANUAL.txt').read_text(encoding='utf-8'))
         text.config(state='disabled')
 
 
+def main():
+    params = leer_config()
+    try:
+        repo = Repository(params)
+    except psycopg.Error as exc:
+        root = tk.Tk(); root.withdraw()
+        messagebox.showerror(
+            'No se pudo conectar a PostgreSQL',
+            f'Servidor: {params.get("host")}:{params.get("port")} · Base: {params.get("dbname")} · Usuario: {params.get("user")}\n\n'
+            f'{exc}\n\nVerificá que PostgreSQL esté en ejecución y revisá config.ini '
+            f'(copiá config.example.ini como config.ini junto al programa).')
+        root.destroy()
+        return 1
+    App(repo).mainloop()
+    return 0
+
+
 if __name__=='__main__':
-    App().mainloop()
+    sys.exit(main())

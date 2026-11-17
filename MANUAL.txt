@@ -2,10 +2,13 @@ MANUAL DE USUARIO — INCREMENTO 1 / FACULTAD
 Responsable: Luis Rolón
 
 1. INICIO
-Instalar Python 3.10 o superior desde python.org. En Windows, incluir Tcl/Tk
-y marcar Add Python to PATH. Extraer todo el ZIP antes de abrir el programa.
-Hacer doble clic en INICIAR_WINDOWS.bat o ejecutar: python app.py
-No requiere pip ni Internet. En Linux puede requerir el paquete python3-tk.
+Requisito: PostgreSQL instalado y en ejecución (incluye pgAdmin).
+Usuario final: descargar GestionBibliografia.exe desde Releases de GitHub.
+Copiar config.example.ini como config.ini junto al .exe y escribir la
+contraseña del usuario postgres. Hacer doble clic en el .exe. No requiere
+instalar Python. Si la base "bibliografia" no existe, se crea sola.
+Desarrollo: python -m pip install -r requirements.txt y luego
+INICIAR_WINDOWS.bat o python app.py (config.ini junto a app.py).
 
 2. REGISTRAR FACULTAD
 En Facultades, pulsar Nuevo / limpiar. Escribir código y nombre y Guardar.
@@ -32,9 +35,9 @@ Si se desactiva una facultad, sus vínculos se conservan y se indica su estado.
 
 6. AYUDA Y GUARDADO
 F1 abre este manual desde cualquiera de las dos pantallas. También se accede
-desde el menú principal. Los cambios se guardan automáticamente en
-bibliografia.sqlite3, junto a app.py. Cerrar el programa antes de copiar
-esa base para respaldo. Mantener la carpeta en una ubicación con escritura.
+desde el menú principal. Los cambios se guardan automáticamente en la
+base PostgreSQL indicada en config.ini. Para respaldo usar pgAdmin
+(clic derecho en la base > Backup). Las tablas se crean al iniciar.
 La aplicación se entrega vacía: los ejemplos se cargan manualmente.
 
 7. ALCANCE E INTEGRACIÓN
@@ -42,8 +45,9 @@ Aplicación de escritorio, no sitio web. Incluye Facultad y la asociación
 Facultad–Carrera. No incluye los otros tres módulos ni reportes bibliográficos.
 El equipo debe reutilizar las tablas y acordar cambios de esquema antes de
 integrar. Repository separa las operaciones de datos de la interfaz.
-Tablas: facultades(id,codigo,nombre,activo),
-carreras(id,codigo,nombre,facultad_id). SQLite activa claves foráneas.
+Tablas (PostgreSQL): facultades(id,codigo,nombre,activo),
+carreras(id,codigo,nombre,facultad_id). Códigos únicos sin distinguir
+mayúsculas (índice sobre upper(codigo)); facultad_id es clave foránea.
 El primer incremento deja facultad_id nulo al quitar una asociación,
 según PB-03; el módulo 2 deberá exigir facultad al completar sus carreras.
 
