@@ -1,0 +1,55 @@
+MANUAL DE USUARIO — INCREMENTO 1 / FACULTAD
+Responsable: Luis Rolón
+
+1. INICIO
+Instalar Python 3.10 o superior desde python.org. En Windows, incluir Tcl/Tk
+y marcar Add Python to PATH. Extraer todo el ZIP antes de abrir el programa.
+Hacer doble clic en INICIAR_WINDOWS.bat o ejecutar: python app.py
+No requiere pip ni Internet. En Linux puede requerir el paquete python3-tk.
+
+2. REGISTRAR FACULTAD
+En Facultades, pulsar Nuevo / limpiar. Escribir código y nombre y Guardar.
+Ejemplo: FAC01 — Ciencias y Tecnología. Los campos son obligatorios.
+Los códigos son únicos incluso si la facultad está inactiva; no se distinguen
+mayúsculas de minúsculas. El código admite hasta 20 caracteres; nombre 120.
+
+3. CONSULTAR Y MODIFICAR
+Buscar por nombre o código. Seleccionar una fila para cargar sus datos.
+Cambiar código o nombre y pulsar Guardar. Nuevo / limpiar inicia otra alta.
+
+4. BAJA LÓGICA Y REACTIVACIÓN
+Seleccionar una fila y Desactivar, luego confirmar. No se borra el registro
+ni sus relaciones. Marcar Mostrar inactivas para consultarlo o reactivarlo.
+
+5. ASOCIAR CARRERA
+En Facultad y carreras, registrar una carrera con código y nombre si aún
+no existe. Este registro mínimo permite probar el primer módulo; la gestión
+completa de carreras y materias corresponde al incremento 2.
+Seleccionar la carrera, elegir una facultad activa y Asociar / cambiar.
+Una carrera tiene como máximo una facultad. Quitar vínculo elimina solo
+la asociación. Se puede reasignar una carrera a otra facultad activa.
+Si se desactiva una facultad, sus vínculos se conservan y se indica su estado.
+
+6. AYUDA Y GUARDADO
+F1 abre este manual desde cualquiera de las dos pantallas. También se accede
+desde el menú principal. Los cambios se guardan automáticamente en
+bibliografia.sqlite3, junto a app.py. Cerrar el programa antes de copiar
+esa base para respaldo. Mantener la carpeta en una ubicación con escritura.
+La aplicación se entrega vacía: los ejemplos se cargan manualmente.
+
+7. ALCANCE E INTEGRACIÓN
+Aplicación de escritorio, no sitio web. Incluye Facultad y la asociación
+Facultad–Carrera. No incluye los otros tres módulos ni reportes bibliográficos.
+El equipo debe reutilizar las tablas y acordar cambios de esquema antes de
+integrar. Repository separa las operaciones de datos de la interfaz.
+Tablas: facultades(id,codigo,nombre,activo),
+carreras(id,codigo,nombre,facultad_id). SQLite activa claves foráneas.
+El primer incremento deja facultad_id nulo al quitar una asociación,
+según PB-03; el módulo 2 deberá exigir facultad al completar sus carreras.
+
+8. DEMOSTRACIÓN PARA PRESENTAR
+Crear FAC01. Mostrarla y buscarla. Cambiar su nombre. Intentar repetir el
+código y mostrar el aviso. Registrar CAR01 — Ingeniería Informática y
+asociarla a FAC01. Desactivar FAC01 y mostrar que la carrera conserva el
+vínculo. Reactivar y quitar el vínculo. Abrir F1. Cerrar y volver a abrir:
+los registros deben continuar guardados.
