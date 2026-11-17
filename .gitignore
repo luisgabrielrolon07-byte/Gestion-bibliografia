@@ -1,0 +1,20 @@
+# Configuración local (contiene la contraseña de PostgreSQL)
+config.ini
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+env/
+
+# PyInstaller: el .exe se publica como Release en GitHub, no en el repo
+build/
+dist/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# Base SQLite de la versión anterior
+*.sqlite3
